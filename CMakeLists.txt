@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.13)
+cmake_minimum_required(VERSION 3.5)
 
 include(pico_sdk_import.cmake)
 project(pico_neuron C CXX ASM)
@@ -32,6 +32,7 @@ target_include_directories(neuron
 
 target_link_libraries(neuron
   hardware_adc
+  pico_btstack_ble
   pico_cyw43_arch_lwip_threadsafe_background
   pico_multicore
   pico_stdlib
