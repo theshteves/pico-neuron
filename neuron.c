@@ -358,6 +358,10 @@ int main(int argv, const char *argc[]) {
   gap_le_advertisements_setup();
   hci_power_control(HCI_POWER_ON);
 
+  while (true) {
+    sleep_ms(NEURON_FRAMERATE_MS);
+  }
+
   cyw43_arch_deinit();
   return 0;
 }

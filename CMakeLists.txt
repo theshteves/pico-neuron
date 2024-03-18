@@ -33,6 +33,7 @@ target_include_directories(neuron
 target_link_libraries(neuron
   hardware_adc
   pico_btstack_ble
+  pico_btstack_cyw43
   pico_cyw43_arch_lwip_threadsafe_background
   pico_multicore
   pico_stdlib
