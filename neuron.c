@@ -56,14 +56,15 @@ static uint8_t gatt_service_buffer[70];
 #define APP_AD_FLAGS 0x06
 #endif
 
-//#define NEURON_LATENCY_MS 3
+//#define NEURON_LATENCY_MS 20
 #define NEURON_FRAMERATE_MS 100
 #define NEURON_SENSITIVITY_RATIO 32
+// 32 @ 100ms
+// 8 @ 500ms?
 
 static bool NEURON_IS_FIRING = false;
 
-static btstack_packet_callback_registration_t hci_event_callback_registration;
-
+//OH! Each field is 1st byte: field length, second byte: field type, [field_length-1 bytees]: field data
 const uint8_t adv_data[] = {
     // Flags general discoverable
     0x02, BLUETOOTH_DATA_TYPE_FLAGS, APP_AD_FLAGS,
@@ -72,67 +73,13 @@ const uint8_t adv_data[] = {
     // Incomplete List of 16-bit Service Class UUIDs -- FF10 - only valid for testing!
     0x03, BLUETOOTH_DATA_TYPE_INCOMPLETE_LIST_OF_16_BIT_SERVICE_CLASS_UUIDS, 0x10, 0xff,
 };
+
 const uint8_t adv_data_len = sizeof(adv_data);
-
-/* @section GAP LE setup for receiving advertisements
- *
- * @text GAP LE advertisements are received as custom HCI events of the 
- * GAP_EVENT_ADVERTISING_REPORT type. To receive them, you'll need to register
- * the HCI packet handler, as shown in Listing GAPLEAdvSetup.
- */
-
-/* LISTING_START(GAPLEAdvSetup): Setting up GAP LE client for receiving advertisements */
+static btstack_packet_callback_registration_t hci_event_callback_registration;
 static void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packet, uint16_t size);
+void fire_neuron();
 
-static void gap_le_advertisements_setup(void){
 
-    l2cap_init();
-
-    // setup SM: Display only
-    sm_init();
-
-#ifdef ENABLE_GATT_OVER_CLASSIC
-    // init SDP, create record for GATT and register with SDP
-    sdp_init();
-    memset(gatt_service_buffer, 0, sizeof(gatt_service_buffer));
-    gatt_create_sdp_record(gatt_service_buffer, 0x10001, ATT_SERVICE_GATT_SERVICE_START_HANDLE, ATT_SERVICE_GATT_SERVICE_END_HANDLE);
-    sdp_register_service(gatt_service_buffer);
-    printf("SDP service record size: %u\n", de_get_len(gatt_service_buffer));
-
-    // configure Classic GAP
-    gap_set_local_name("GATT Streamer BR/EDR 00:00:00:00:00:00");
-    gap_ssp_set_io_capability(SSP_IO_CAPABILITY_DISPLAY_YES_NO);
-    gap_discoverable_control(1);
-#endif
-
-    // Active scanning, 100% (scan interval = scan window)
-    gap_set_scan_parameters(1,48,48);
-    gap_start_scan(); 
-
-    // setup advertisements
-    uint16_t adv_int_min = 0x0030;
-    uint16_t adv_int_max = 0x0030;
-    uint8_t adv_type = 0;
-    bd_addr_t null_addr;
-    memset(null_addr, 0, 6);
-    gap_advertisements_set_params(adv_int_min, adv_int_max, adv_type, 0, null_addr, 0x07, 0x00);
-    gap_advertisements_set_data(adv_data_len, (uint8_t*) adv_data);
-    gap_advertisements_enable(1);
-
-    hci_event_callback_registration.callback = &packet_handler;
-    hci_add_event_handler(&hci_event_callback_registration);
-}
-
-/* LISTING_END */
-
-/* @section GAP LE Advertising Data Dumper
- *
- * @text Here, we use the definition of advertising data types and flags as specified in 
- * [Assigned Numbers GAP](https://www.bluetooth.org/en-us/specification/assigned-numbers/generic-access-profile)
- * and [Supplement to the Bluetooth Core Specification, v4](https://www.bluetooth.org/DocMan/handlers/DownloadDoc.ashx?doc_id=282152).
- */
-
-/* LISTING_START(GAPLEAdvDataTypesAndFlags): Advertising data types and flags */
 static const char * ad_types[] = {
     "", 
     "Flags",
@@ -173,15 +120,9 @@ static const char * flags[] = {
     "Reserved",
     "Reserved"
 };
-/* LISTING_END */
 
-/* @text BTstack offers an iterator for parsing sequence of advertising data (AD) structures, 
- * see [BLE advertisements parser API](../appendix/apis/#ble-advertisements-parser-api).
- * After initializing the iterator, each AD structure is dumped according to its type.
- */
 
-/* LISTING_START(GAPLEAdvDataParsing): Parsing advertising data */
-static void dump_advertisement_data(const uint8_t * adv_data, uint8_t adv_size){
+static bool is_neighbor_neuron(const uint8_t * adv_data, uint8_t adv_size){
     ad_context_t context;
     bd_addr_t address;
     uint8_t uuid_128[16];
@@ -191,7 +132,7 @@ static void dump_advertisement_data(const uint8_t * adv_data, uint8_t adv_size){
         const uint8_t * data = ad_iterator_get_data(&context);
         
         if (data_type > 0 && data_type < 0x1B){
-            printf("    %s: ", ad_types[data_type]);
+            true;//printf("    %s: ", ad_types[data_type]);
         } 
         int i;
         // Assigned Numbers GAP
@@ -200,8 +141,9 @@ static void dump_advertisement_data(const uint8_t * adv_data, uint8_t adv_size){
             case BLUETOOTH_DATA_TYPE_FLAGS:
                 // show only first octet, ignore rest
                 for (i=0; i<8;i++){
+
                     if (data[0] & (1<<i)){
-                        printf("%s; ", flags[i]);
+                        true;//printf("%s; ", flags[i]);
                     }
 
                 }
@@ -210,14 +152,14 @@ static void dump_advertisement_data(const uint8_t * adv_data, uint8_t adv_size){
             case BLUETOOTH_DATA_TYPE_COMPLETE_LIST_OF_16_BIT_SERVICE_CLASS_UUIDS:
             case BLUETOOTH_DATA_TYPE_LIST_OF_16_BIT_SERVICE_SOLICITATION_UUIDS:
                 for (i=0; i<size;i+=2){
-                    printf("%02X ", little_endian_read_16(data, i));
+                    true;//printf("%02X ", little_endian_read_16(data, i));
                 }
                 break;
             case BLUETOOTH_DATA_TYPE_INCOMPLETE_LIST_OF_32_BIT_SERVICE_CLASS_UUIDS:
             case BLUETOOTH_DATA_TYPE_COMPLETE_LIST_OF_32_BIT_SERVICE_CLASS_UUIDS:
             case BLUETOOTH_DATA_TYPE_LIST_OF_32_BIT_SERVICE_SOLICITATION_UUIDS:
                 for (i=0; i<size;i+=4){
-                    printf("%04"PRIX32, little_endian_read_32(data, i));
+                    true;//printf("%04"PRIX32, little_endian_read_32(data, i));
                 }
                 break;
             case BLUETOOTH_DATA_TYPE_INCOMPLETE_LIST_OF_128_BIT_SERVICE_CLASS_UUIDS:
@@ -228,36 +170,47 @@ static void dump_advertisement_data(const uint8_t * adv_data, uint8_t adv_size){
                 break;
             case BLUETOOTH_DATA_TYPE_SHORTENED_LOCAL_NAME:
             case BLUETOOTH_DATA_TYPE_COMPLETE_LOCAL_NAME:
+                printf("=> `");
                 for (i=0; i<size;i++){
                     printf("%c", (char)(data[i]));
                 }
+                printf("`\n");
+
+                //printf("\n...yee? %s\n", (const char *)data);
+                int _test = strncmp((const char *)data, "LE Streamer", size);
+                //printf("%d:%d", size, _test);
+                if (size == 11 && _test == 0) {
+                  // Neighbor neuron fired? Time to fire!
+                  NEURON_IS_FIRING = 1;
+                  printf("\nY E E H A W\n");
+                  return true;
+                }
                 break;
             case BLUETOOTH_DATA_TYPE_TX_POWER_LEVEL:
-                printf("%d dBm", *(int8_t*)data);
+                true;//printf("%d dBm", *(int8_t*)data);
                 break;
             case BLUETOOTH_DATA_TYPE_SLAVE_CONNECTION_INTERVAL_RANGE:
-                printf("Connection Interval Min = %u ms, Max = %u ms", little_endian_read_16(data, 0) * 5/4, little_endian_read_16(data, 2) * 5/4);
+                true;//printf("Connection Interval Min = %u ms, Max = %u ms", little_endian_read_16(data, 0) * 5/4, little_endian_read_16(data, 2) * 5/4);
                 break;
             case BLUETOOTH_DATA_TYPE_SERVICE_DATA:
-                printf_hexdump(data, size);
+                true;//printf_hexdump(data, size);
                 break;
             case BLUETOOTH_DATA_TYPE_PUBLIC_TARGET_ADDRESS:
             case BLUETOOTH_DATA_TYPE_RANDOM_TARGET_ADDRESS:
                 reverse_bd_addr(data, address);
-                printf("%s", bd_addr_to_str(address));
+                true;//printf("%s", bd_addr_to_str(address));
                 break;
             case BLUETOOTH_DATA_TYPE_APPEARANCE: 
                 // https://developer.bluetooth.org/gatt/characteristics/Pages/CharacteristicViewer.aspx?u=org.bluetooth.characteristic.gap.appearance.xml
-                printf("%02X", little_endian_read_16(data, 0) );
+                true;//printf("%02X", little_endian_read_16(data, 0) );
                 break;
             case BLUETOOTH_DATA_TYPE_ADVERTISING_INTERVAL:
-                printf("%u ms", little_endian_read_16(data, 0) * 5/8 );
+                true;//printf("%u ms", little_endian_read_16(data, 0) * 5/8 );
                 break;
             case BLUETOOTH_DATA_TYPE_3D_INFORMATION_DATA:
-                printf_hexdump(data, size);
+                true;//printf_hexdump(data, size);
                 break;
             case BLUETOOTH_DATA_TYPE_MANUFACTURER_SPECIFIC_DATA: // Manufacturer Specific Data 
-                printf(NEURON_IS_FIRING ? "Y" : "N");
                 break;
             case BLUETOOTH_DATA_TYPE_CLASS_OF_DEVICE:
             case BLUETOOTH_DATA_TYPE_SIMPLE_PAIRING_HASH_C:
@@ -265,24 +218,15 @@ static void dump_advertisement_data(const uint8_t * adv_data, uint8_t adv_size){
             case BLUETOOTH_DATA_TYPE_DEVICE_ID: 
             case BLUETOOTH_DATA_TYPE_SECURITY_MANAGER_OUT_OF_BAND_FLAGS:
             default:
-                printf("Advertising Data Type 0x%2x not handled yet", data_type); 
+                true;//printf("Advertising Data Type 0x%2x not handled yet", data_type); 
                 break;
         }        
-        printf("\n");
+        true;//printf("\n");
     }
-    printf("\n");
+    true;//printf("\n");
+    return false;
 }
-/* LISTING_END */
 
-/* @section HCI packet handler
- * 
- * @text The HCI packet handler has to start the scanning, 
- * and to handle received advertisements. Advertisements are received 
- * as HCI event packets of the GAP_EVENT_ADVERTISING_REPORT type,
- * see Listing GAPLEAdvPacketHandler.  
- */
-
-/* LISTING_START(GAPLEAdvPacketHandler): Scanning and receiving advertisements */
 
 static void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packet, uint16_t size){
     UNUSED(channel);
@@ -305,10 +249,16 @@ static void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packe
             rssi = gap_event_advertising_report_get_rssi(packet);
             length = gap_event_advertising_report_get_data_length(packet);
             data = gap_event_advertising_report_get_data(packet);
-            printf("Advertisement (legacy) event: evt-type %u, addr-type %u, addr %s, rssi %d, data[%u] ", event_type,
-               address_type, bd_addr_to_str(address), rssi, length);
-            printf_hexdump(data, length);
-            dump_advertisement_data(data, length);
+
+            if (is_neighbor_neuron(data, length)) {
+              printf("{\n\thci_event_packet: legacy,\n\tevt_type: %u,\n\taddr_type: %u,\n\taddr: %s,\n\trssi: %d,\n\tsize: %u,\n\traw: \"", event_type, address_type, bd_addr_to_str(address), rssi, length);
+              printf_hexdump(data, length);
+              printf("}\n");
+
+              int neuron_latency_ms = MAX(5, -(rssi * 4) - 70);
+              sleep_ms(neuron_latency_ms);
+              fire_neuron();
+            }
             break;
 #ifdef ENABLE_LE_EXTENDED_ADVERTISING
         case GAP_EVENT_EXTENDED_ADVERTISING_REPORT:
@@ -328,19 +278,43 @@ static void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packe
             break;
     }
 }
-/* LISTING_END */
 
 
-/*
- * Blink LED at a frequency relative to best Wi-Fi RSSI
- */
-void led_neuron() {
+void fire_neuron() {
+    cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, 1);
+    gap_stop_scan();
+
+    // setup advertisements
+    uint16_t adv_int_min = 0x0030;
+    uint16_t adv_int_max = 0x0030;
+    uint8_t adv_type = 0;
+    bd_addr_t null_addr;
+    memset(null_addr, 0, 6);
+    gap_advertisements_set_params(adv_int_min, adv_int_max, adv_type, 0, null_addr, 0x07, 0x00);
+    gap_advertisements_set_data(adv_data_len, (uint8_t*) adv_data);
+    gap_advertisements_enable(1);
+
+    sleep_ms(NEURON_FRAMERATE_MS >> 1);
+    //sleep_ms(NEURON_FRAMERATE_MS);
+
+    cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, 0);
+    gap_advertisements_enable(0);
+    // Active scanning, 100% (scan interval = scan window)
+    gap_set_scan_parameters(1,48,48);
+    gap_start_scan(); 
+}
+
+
+void simulate_neuron() {
   while (true) {
     NEURON_IS_FIRING = time_us_64() % NEURON_SENSITIVITY_RATIO == 0;
-    cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, NEURON_IS_FIRING);
     write(1, NEURON_IS_FIRING ? "+" : "-", 1);
 
-    sleep_ms(NEURON_FRAMERATE_MS);
+    if (NEURON_IS_FIRING) {
+      fire_neuron();
+    } else {
+      sleep_ms(NEURON_FRAMERATE_MS);
+    }
   }
 }
 
@@ -353,14 +327,11 @@ int main(int argv, const char *argc[]) {
     return 1;
   }
 
-  multicore_launch_core1(led_neuron);
-
-  gap_le_advertisements_setup();
+  hci_event_callback_registration.callback = &packet_handler;
+  hci_add_event_handler(&hci_event_callback_registration);
   hci_power_control(HCI_POWER_ON);
 
-  while (true) {
-    sleep_ms(NEURON_FRAMERATE_MS);
-  }
+  simulate_neuron();
 
   cyw43_arch_deinit();
   return 0;
