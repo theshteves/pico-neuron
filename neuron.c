@@ -57,8 +57,9 @@ static uint8_t gatt_service_buffer[70];
 #endif
 
 //#define NEURON_LATENCY_MS 20
+#define ADVERTISING_INTERVAL_MS 48
 #define NEURON_FRAMERATE_MS 100
-#define NEURON_SENSITIVITY_RATIO 32
+#define NEURON_SENSITIVITY_RATIO 256
 // 32 @ 100ms
 // 8 @ 500ms?
 
@@ -255,7 +256,7 @@ static void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packe
               printf_hexdump(data, length);
               printf("}\n");
 
-              int neuron_latency_ms = MAX(5, -(rssi * 4) - 70);
+              int neuron_latency_ms = MAX(10, rssi * -10); //MAX(5, -(rssi * 4) - 70);
               sleep_ms(neuron_latency_ms);
               fire_neuron();
             }
@@ -285,8 +286,8 @@ void fire_neuron() {
     gap_stop_scan();
 
     // setup advertisements
-    uint16_t adv_int_min = 0x0030;
-    uint16_t adv_int_max = 0x0030;
+    uint16_t adv_int_min = ADVERTISING_INTERVAL_MS;
+    uint16_t adv_int_max = ADVERTISING_INTERVAL_MS;
     uint8_t adv_type = 0;
     bd_addr_t null_addr;
     memset(null_addr, 0, 6);
@@ -295,10 +296,12 @@ void fire_neuron() {
     gap_advertisements_enable(1);
 
     sleep_ms(NEURON_FRAMERATE_MS >> 1);
-    //sleep_ms(NEURON_FRAMERATE_MS);
 
     cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, 0);
     gap_advertisements_enable(0);
+
+    sleep_ms(2000);
+
     // Active scanning, 100% (scan interval = scan window)
     gap_set_scan_parameters(1,48,48);
     gap_start_scan(); 
